@@ -269,3 +269,152 @@ func TestToGeminiSchema_WithRef(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveRef(t *testing.T) {
+	tests := []struct {
+		name          string
+		ref           string
+		definitions   map[string]*orderedmap.Map
+		expectedValue *orderedmap.Map
+		expectError   bool
+	}{
+		{
+			name: "Valid reference",
+			ref:  "#/$defs/User",
+			definitions: func() map[string]*orderedmap.Map {
+				userMap := orderedmap.New()
+				userMap.Set("type", "object")
+
+				propertiesMap := orderedmap.New()
+
+				nameMap := orderedmap.New()
+				nameMap.Set("type", "string")
+				propertiesMap.Set("name", nameMap)
+
+				ageMap := orderedmap.New()
+				ageMap.Set("type", "integer")
+				propertiesMap.Set("age", ageMap)
+
+				userMap.Set("properties", propertiesMap)
+
+				return map[string]*orderedmap.Map{
+					"User": userMap,
+				}
+			}(),
+			expectedValue: func() *orderedmap.Map {
+				userMap := orderedmap.New()
+				userMap.Set("type", "object")
+
+				propertiesMap := orderedmap.New()
+
+				nameMap := orderedmap.New()
+				nameMap.Set("type", "string")
+				propertiesMap.Set("name", nameMap)
+
+				ageMap := orderedmap.New()
+				ageMap.Set("type", "integer")
+				propertiesMap.Set("age", ageMap)
+
+				userMap.Set("properties", propertiesMap)
+
+				return userMap
+			}(),
+			expectError: false,
+		},
+		{
+			name: "Reference not found",
+			ref:  "#/$defs/NonExistentUser",
+			definitions: func() map[string]*orderedmap.Map {
+				userMap := orderedmap.New()
+				userMap.Set("type", "object")
+
+				propertiesMap := orderedmap.New()
+
+				nameMap := orderedmap.New()
+				nameMap.Set("type", "string")
+				propertiesMap.Set("name", nameMap)
+
+				userMap.Set("properties", propertiesMap)
+
+				return map[string]*orderedmap.Map{
+					"User": userMap,
+				}
+			}(),
+			expectedValue: nil,
+			expectError:   true,
+		},
+		{
+			name:          "Empty definitions",
+			ref:           "#/$defs/User",
+			definitions:   map[string]*orderedmap.Map{},
+			expectedValue: nil,
+			expectError:   true,
+		},
+		{
+			name: "Invalid reference format",
+			ref:  "#/$defs/User/SubObject",
+			definitions: func() map[string]*orderedmap.Map {
+				userMap := orderedmap.New()
+				userMap.Set("type", "object")
+
+				return map[string]*orderedmap.Map{
+					"User": userMap,
+				}
+			}(),
+			expectedValue: nil,
+			expectError:   true,
+		},
+		{
+			name: "Non-standard reference",
+			ref:  "User",
+			definitions: func() map[string]*orderedmap.Map {
+				userMap := orderedmap.New()
+				userMap.Set("type", "string")
+
+				return map[string]*orderedmap.Map{
+					"User": userMap,
+				}
+			}(),
+			expectedValue: func() *orderedmap.Map {
+				userMap := orderedmap.New()
+				userMap.Set("type", "string")
+				return userMap
+			}(),
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := resolveRef(tt.ref, tt.definitions)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, result)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, result)
+
+				// Compare keys
+				assert.Equal(t, tt.expectedValue.Keys(), result.Keys())
+
+				// Compare individual values
+				for _, key := range tt.expectedValue.Keys() {
+					expectedVal, _ := tt.expectedValue.Get(key)
+					actualVal, exists := result.Get(key)
+					assert.True(t, exists)
+
+					// For nested maps, compare their JSON string representation
+					if expectedMap, ok := expectedVal.(*orderedmap.Map); ok {
+						actualMap, _ := actualVal.(*orderedmap.Map)
+						expectedJSON, _ := json.Marshal(expectedMap)
+						actualJSON, _ := json.Marshal(actualMap)
+						assert.Equal(t, string(expectedJSON), string(actualJSON))
+					} else {
+						assert.Equal(t, expectedVal, actualVal)
+					}
+				}
+			}
+		})
+	}
+}
